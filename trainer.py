@@ -12,6 +12,7 @@ import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
+from torch.utils.tensorboard import SummaryWriter
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
