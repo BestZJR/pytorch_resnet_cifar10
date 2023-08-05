@@ -164,7 +164,15 @@ def main():
 def train(train_loader, model, criterion, optimizer, epoch, writer):
     # ...
     # 其他代码不变
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+    top1 = AverageMeter()
 
+    # switch to train mode
+    model.train()
+
+    end = time.time()
     for i, (input, target) in enumerate(train_loader):
 
         # ...
