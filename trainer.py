@@ -29,7 +29,7 @@ parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--epochs', default=200, type=int, metavar='N',
                     help='number of total epochs to run')
-parser.add_argument('--start-epoch', default=150, type=int, metavar='N',
+parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('-b', '--batch-size', default=128, type=int,
                     metavar='N', help='mini-batch size (default: 128)')
@@ -62,7 +62,6 @@ def main():
     global args, best_prec1
     args = parser.parse_args()
 
-
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
@@ -70,7 +69,7 @@ def main():
     model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
     model.cuda()
 
-    # optionally resume from a checkpoint
+    # Optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
@@ -106,7 +105,7 @@ def main():
         batch_size=128, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-    # define loss function (criterion) and optimizer
+    # Define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
     if args.half:
@@ -121,27 +120,29 @@ def main():
                                                         milestones=[100, 150], last_epoch=args.start_epoch - 1)
 
     if args.arch in ['resnet1202', 'resnet110']:
-        # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
+        # For resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
         # then switch back. In this setup it will correspond for first epoch.
         for param_group in optimizer.param_groups:
-            param_group['lr'] = args.lr*0.1
+            param_group['lr'] = args.lr * 0.1
 
+    # Create TensorBoard SummaryWriter
+    writer = SummaryWriter(log_dir=os.path.join(args.save_dir, 'logs'))
 
     if args.evaluate:
-        validate(val_loader, model, criterion)
+        validate(val_loader, model, criterion, writer)
         return
 
     for epoch in range(args.start_epoch, args.epochs):
 
-        # train for one epoch
+        # Train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, writer)
         lr_scheduler.step()
 
-        # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
+        # Evaluate on validation set
+        prec1 = validate(val_loader, model, criterion, writer)
 
-        # remember best prec@1 and save checkpoint
+        # Remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
 
@@ -157,23 +158,21 @@ def main():
             'best_prec1': best_prec1,
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
+    # Close the SummaryWriter after training is finished
+    writer.close()
 
-def train(train_loader, model, criterion, optimizer, epoch):
-    """
-        Run one train epoch
-    """
+
+def train(train_loader, model, criterion, optimizer, epoch, writer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
 
-    # switch to train mode
+    # Switch to train mode
     model.train()
 
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
-
-        # measure data loading time
         data_time.update(time.time() - end)
 
         target = target.cuda()
@@ -182,45 +181,35 @@ def train(train_loader, model, criterion, optimizer, epoch):
         if args.half:
             input_var = input_var.half()
 
-        # compute output
         output = model(input_var)
         loss = criterion(output, target_var)
 
-        # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         output = output.float()
         loss = loss.float()
-        # measure accuracy and record loss
+
         prec1 = accuracy(output.data, target)[0]
         losses.update(loss.item(), input.size(0))
         top1.update(prec1.item(), input.size(0))
 
-        # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                      epoch, i, len(train_loader), batch_time=batch_time,
-                      data_time=data_time, loss=losses, top1=top1))
+        # Add data to TensorBoard for each batch
+        writer.add_scalar('Train/Loss', losses.val, epoch * len(train_loader) + i)
+        writer.add_scalar('Train/Accuracy', top1.val, epoch * len(train_loader) + i)
+
+        writer.flush()
 
 
-def validate(val_loader, model, criterion):
-    """
-    Run evaluation
-    """
+def validate(val_loader, model, criterion, writer):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
 
-    # switch to evaluate mode
     model.eval()
 
     end = time.time()
@@ -233,34 +222,29 @@ def validate(val_loader, model, criterion):
             if args.half:
                 input_var = input_var.half()
 
-            # compute output
             output = model(input_var)
             loss = criterion(output, target_var)
 
             output = output.float()
             loss = loss.float()
 
-            # measure accuracy and record loss
             prec1 = accuracy(output.data, target)[0]
             losses.update(loss.item(), input.size(0))
             top1.update(prec1.item(), input.size(0))
 
-            # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
 
-            if i % args.print_freq == 0:
-                print('Test: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                          i, len(val_loader), batch_time=batch_time, loss=losses,
-                          top1=top1))
+            # Add data to TensorBoard for each batch
+            writer.add_scalar('Test/Loss', losses.val, epoch * len(val_loader) + i)
+            writer.add_scalar('Test/Accuracy', top1.val, epoch * len(val_loader) + i)
 
-    print(' * Prec@1 {top1.avg:.3f}'
-          .format(top1=top1))
+            writer.flush()
+
+    print(' * Prec@1 {top1.avg:.3f}'.format(top1=top1))
 
     return top1.avg
+
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     """
