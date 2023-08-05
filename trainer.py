@@ -70,7 +70,7 @@ def main():
     model = torch.nn.DataParallel(resnet.__dict__[args.arch]())
     model.cuda()
 
-    # Optionally resume from a checkpoint
+    # optionally resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
@@ -106,7 +106,7 @@ def main():
         batch_size=128, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-    # Define loss function (criterion) and optimizer
+    # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
     if args.half:
@@ -121,29 +121,30 @@ def main():
                                                         milestones=[100, 150], last_epoch=args.start_epoch - 1)
 
     if args.arch in ['resnet1202', 'resnet110']:
-        # For resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
+        # for resnet1202 original paper uses lr=0.01 for first 400 minibatches for warm-up
         # then switch back. In this setup it will correspond for first epoch.
         for param_group in optimizer.param_groups:
-            param_group['lr'] = args.lr * 0.1
+            param_group['lr'] = args.lr*0.1
 
     # Create TensorBoard SummaryWriter
     writer = SummaryWriter(log_dir=os.path.join(args.save_dir, 'logs'))
 
     if args.evaluate:
-        validate(val_loader, model, criterion, writer)
+        validate(val_loader, model, criterion, writer, 0)  # Pass epoch as 0 during evaluation
+        writer.close()
         return
 
     for epoch in range(args.start_epoch, args.epochs):
 
-        # Train for one epoch
+        # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
         train(train_loader, model, criterion, optimizer, epoch, writer)
         lr_scheduler.step()
 
-        # Evaluate on validation set
-        prec1 = validate(val_loader, model, criterion, writer)
+        # evaluate on validation set
+        prec1 = validate(val_loader, model, criterion, writer, epoch)  # Pass epoch during validation
 
-        # Remember best prec@1 and save checkpoint
+        # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
         best_prec1 = max(prec1, best_prec1)
 
@@ -162,18 +163,24 @@ def main():
     # Close the SummaryWriter after training is finished
     writer.close()
 
+# ... (previous code)
 
-def train(train_loader, model, criterion, optimizer, epoch, writer):
+def train(train_loader, model, criterion, optimizer, epoch, writer):  # Pass writer and epoch as arguments
+    """
+    Run one train epoch
+    """
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
 
-    # Switch to train mode
+    # switch to train mode
     model.train()
 
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
+
+        # measure data loading time
         data_time.update(time.time() - end)
 
         target = target.cuda()
@@ -182,22 +189,34 @@ def train(train_loader, model, criterion, optimizer, epoch, writer):
         if args.half:
             input_var = input_var.half()
 
+        # compute output
         output = model(input_var)
         loss = criterion(output, target_var)
 
+        # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         output = output.float()
         loss = loss.float()
-
+        # measure accuracy and record loss
         prec1 = accuracy(output.data, target)[0]
         losses.update(loss.item(), input.size(0))
         top1.update(prec1.item(), input.size(0))
 
+        # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
+
+        if i % args.print_freq == 0:
+            print('Epoch: [{0}][{1}/{2}]\t'
+                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+                      epoch, i, len(train_loader), batch_time=batch_time,
+                      data_time=data_time, loss=losses, top1=top1))
 
         # Add data to TensorBoard for each batch
         writer.add_scalar('Train/Loss', losses.val, epoch * len(train_loader) + i)
@@ -206,11 +225,15 @@ def train(train_loader, model, criterion, optimizer, epoch, writer):
         writer.flush()
 
 
-def validate(val_loader, model, criterion, writer):
+def validate(val_loader, model, criterion, writer, epoch):  # Pass writer and epoch as arguments
+    """
+    Run evaluation
+    """
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
 
+    # switch to evaluate mode
     model.eval()
 
     end = time.time()
@@ -223,18 +246,29 @@ def validate(val_loader, model, criterion, writer):
             if args.half:
                 input_var = input_var.half()
 
+            # compute output
             output = model(input_var)
             loss = criterion(output, target_var)
 
             output = output.float()
             loss = loss.float()
 
+            # measure accuracy and record loss
             prec1 = accuracy(output.data, target)[0]
             losses.update(loss.item(), input.size(0))
             top1.update(prec1.item(), input.size(0))
 
+            # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
+
+            if i % args.print_freq == 0:
+                print('Test: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+                          i, len(val_loader), batch_time=batch_time, loss=losses,
+                          top1=top1))
 
             # Add data to TensorBoard for each batch
             writer.add_scalar('Test/Loss', losses.val, epoch * len(val_loader) + i)
@@ -252,6 +286,7 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     Save the training model
     """
     torch.save(state, filename)
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
