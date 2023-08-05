@@ -12,6 +12,7 @@ import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
+from torch.utils.tensorboard import SummaryWriter
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -61,7 +62,6 @@ best_prec1 = 0
 def main():
     global args, best_prec1
     args = parser.parse_args()
-
 
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
@@ -126,20 +126,21 @@ def main():
         for param_group in optimizer.param_groups:
             param_group['lr'] = args.lr*0.1
 
+    # Create SummaryWriter for logging
+    writer = SummaryWriter(log_dir=os.path.join(args.save_dir, 'logs'))
 
     if args.evaluate:
-        validate(val_loader, model, criterion)
+        validate(val_loader, model, criterion, writer)
         return
 
     for epoch in range(args.start_epoch, args.epochs):
-
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, writer)
         lr_scheduler.step()
 
         # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
+        prec1 = validate(val_loader, model, criterion, writer)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -157,11 +158,9 @@ def main():
             'best_prec1': best_prec1,
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
+    writer.close()
 
-def train(train_loader, model, criterion, optimizer, epoch):
-    """
-        Run one train epoch
-    """
+def train(train_loader, model, criterion, optimizer, epoch, writer):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -211,11 +210,14 @@ def train(train_loader, model, criterion, optimizer, epoch):
                       epoch, i, len(train_loader), batch_time=batch_time,
                       data_time=data_time, loss=losses, top1=top1))
 
+        # Add data to TensorBoard
+        writer.add_scalar('Train/Loss', losses.val, epoch * len(train_loader) + i)
+        writer.add_scalar('Train/Accuracy', top1.val, epoch * len(train_loader) + i)
 
-def validate(val_loader, model, criterion):
-    """
-    Run evaluation
-    """
+        writer.flush()
+
+
+def validate(val_loader, model, criterion, writer):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -257,10 +259,17 @@ def validate(val_loader, model, criterion):
                           i, len(val_loader), batch_time=batch_time, loss=losses,
                           top1=top1))
 
+            # Add data to TensorBoard
+            writer.add_scalar('Test/Loss', losses.val, epoch * len(val_loader) + i)
+            writer.add_scalar('Test/Accuracy', top1.val, epoch * len(val_loader) + i)
+
+            writer.flush()
+
     print(' * Prec@1 {top1.avg:.3f}'
           .format(top1=top1))
 
     return top1.avg
+
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     """
