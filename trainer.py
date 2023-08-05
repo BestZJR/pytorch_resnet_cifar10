@@ -62,6 +62,8 @@ def main():
     global args, best_prec1
     args = parser.parse_args()
 
+    # Create TensorBoard writer
+    writer = SummaryWriter()
 
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
@@ -126,20 +128,18 @@ def main():
         for param_group in optimizer.param_groups:
             param_group['lr'] = args.lr*0.1
 
-
     if args.evaluate:
-        validate(val_loader, model, criterion)
+        validate(val_loader, model, criterion, writer, 0)  # Pass epoch as 0 for validation
         return
 
     for epoch in range(args.start_epoch, args.epochs):
-
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, writer)
         lr_scheduler.step()
 
         # evaluate on validation set
-        prec1 = validate(val_loader, model, criterion)
+        prec1 = validate(val_loader, model, criterion, writer, epoch)
 
         # remember best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -156,6 +156,8 @@ def main():
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
+
+    writer.close()  # Close the TensorBoard writer after training is finished
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
