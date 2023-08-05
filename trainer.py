@@ -12,6 +12,7 @@ import torch.utils.data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet
+from torch.utils.tensorboard import SummaryWriter
 
 model_names = sorted(name for name in resnet.__dict__
     if name.islower() and not name.startswith("__")
@@ -61,7 +62,6 @@ best_prec1 = 0
 def main():
     global args, best_prec1
     args = parser.parse_args()
-
 
     # Check the save_dir exists or not
     if not os.path.exists(args.save_dir):
@@ -126,16 +126,17 @@ def main():
         for param_group in optimizer.param_groups:
             param_group['lr'] = args.lr*0.1
 
+    # Create SummaryWriter for logging
+    writer = SummaryWriter(log_dir=os.path.join(args.save_dir, 'logs'))
 
     if args.evaluate:
         validate(val_loader, model, criterion)
         return
 
     for epoch in range(args.start_epoch, args.epochs):
-
         # train for one epoch
         print('current lr {:.5e}'.format(optimizer.param_groups[0]['lr']))
-        train(train_loader, model, criterion, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, writer)
         lr_scheduler.step()
 
         # evaluate on validation set
@@ -157,149 +158,52 @@ def main():
             'best_prec1': best_prec1,
         }, is_best, filename=os.path.join(args.save_dir, 'model.th'))
 
+    writer.close()
 
-def train(train_loader, model, criterion, optimizer, epoch):
-    """
-        Run one train epoch
-    """
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
 
-    # switch to train mode
-    model.train()
+def train(train_loader, model, criterion, optimizer, epoch, writer):
+    # ...
+    # 其他代码不变
 
-    end = time.time()
     for i, (input, target) in enumerate(train_loader):
 
-        # measure data loading time
-        data_time.update(time.time() - end)
+        # ...
+        # 其他代码不变
 
-        target = target.cuda()
-        input_var = input.cuda()
-        target_var = target
-        if args.half:
-            input_var = input_var.half()
+        # Add data to TensorBoard
+        writer.add_scalar('Train/Loss', losses.avg, epoch * len(train_loader) + i)
+        writer.add_scalar('Train/Accuracy', top1.avg, epoch * len(train_loader) + i)
 
-        # compute output
-        output = model(input_var)
-        loss = criterion(output, target_var)
-
-        # compute gradient and do SGD step
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        output = output.float()
-        loss = loss.float()
-        # measure accuracy and record loss
-        prec1 = accuracy(output.data, target)[0]
-        losses.update(loss.item(), input.size(0))
-        top1.update(prec1.item(), input.size(0))
-
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        if i % args.print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                      epoch, i, len(train_loader), batch_time=batch_time,
-                      data_time=data_time, loss=losses, top1=top1))
+        writer.flush()
 
 
 def validate(val_loader, model, criterion):
-    """
-    Run evaluation
-    """
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
+    # ...
+    # 其他代码不变
 
-    # switch to evaluate mode
-    model.eval()
+    for i, (input, target) in enumerate(val_loader):
+        # ...
+        # 其他代码不变
 
-    end = time.time()
-    with torch.no_grad():
-        for i, (input, target) in enumerate(val_loader):
-            target = target.cuda()
-            input_var = input.cuda()
-            target_var = target.cuda()
+        # Add data to TensorBoard
+        writer.add_scalar('Test/Loss', losses.avg, epoch * len(val_loader) + i)
+        writer.add_scalar('Test/Accuracy', top1.avg, epoch * len(val_loader) + i)
 
-            if args.half:
-                input_var = input_var.half()
-
-            # compute output
-            output = model(input_var)
-            loss = criterion(output, target_var)
-
-            output = output.float()
-            loss = loss.float()
-
-            # measure accuracy and record loss
-            prec1 = accuracy(output.data, target)[0]
-            losses.update(loss.item(), input.size(0))
-            top1.update(prec1.item(), input.size(0))
-
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
-
-            if i % args.print_freq == 0:
-                print('Test: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                          i, len(val_loader), batch_time=batch_time, loss=losses,
-                          top1=top1))
-
-    print(' * Prec@1 {top1.avg:.3f}'
-          .format(top1=top1))
+        writer.flush()
 
     return top1.avg
 
+
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    """
-    Save the training model
-    """
-    torch.save(state, filename)
+    # ...
+
 
 class AverageMeter(object):
-    """Computes and stores the average and current value"""
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
+    # ...
 
 
 def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
-    maxk = max(topk)
-    batch_size = target.size(0)
-
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-    res = []
-    for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0)
-        res.append(correct_k.mul_(100.0 / batch_size))
-    return res
+    # ...
 
 
 if __name__ == '__main__':
